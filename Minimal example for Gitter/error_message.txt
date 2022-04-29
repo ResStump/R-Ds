@@ -1,0 +1,316 @@
+InvalidArgumentError                      Traceback (most recent call last)
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/framework/ops.py:1880, in _create_c_op(graph, node_def, inputs, control_inputs, op_def)
+   1879 try:
+-> 1880   c_op = pywrap_tf_session.TF_FinishOperation(op_desc)
+   1881 except errors.InvalidArgumentError as e:
+   1882   # Convert to ValueError for backwards compatibility.
+
+InvalidArgumentError: Dimension 0 in both shapes must be equal, but are 50 and 40. Shapes are [50] and [40].
+	From merging shape 0 with other shapes. for '{{node packed_9}} = Pack[N=2, T=DT_DOUBLE, axis=0](PartitionedCall, PartitionedCall_1)' with input shapes: [50], [40].
+
+During handling of the above exception, another exception occurred:
+
+ValueError                                Traceback (most recent call last)
+/mnt/d/Benutzer/Res Stump/polybox/Dokumente/Schule/ETH_Zuerich/Master/Semester_Project/Data_analysis/Gitter question/zfit_minimal_example_for_Gitter.py in <cell line: 92>()
+     86 data_zfit_obs2 = zfit.Data.from_numpy(
+     87     obs2,
+     88     np.concatenate((Data_obs2_0, Data_obs2_1))
+     89 ).to_binned(obs2)
+     91 # NLL function
+---> 92 NLL = zfit.loss.BinnedNLL(model=[histPDF_obs1, histPDF_obs2],
+     93                           data=[data_zfit_obs1, data_zfit_obs2])
+     95 # miminization
+     96 minimizer = zfit.minimize.Minuit()
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/zfit/_loss/binnedloss.py:350, in BinnedNLL.__init__(self, model, data, constraints, options)
+    271 r"""Binned negative log likelihood.
+    272 
+    273 |@doc:loss.init.explain.spdtransform| A scaled Poisson distribution is
+   (...)
+    347        and behavior. |@docend:loss.init.options|
+    348 """
+    349 self._errordef = 0.5
+--> 350 super().__init__(model=model, data=data, constraints=constraints, options=options)
+    351 extended_pdfs = [pdf for pdf in self.model if pdf.is_extended]
+    352 if extended_pdfs and type(self) == BinnedNLL:
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/zfit/_loss/binnedloss.py:69, in BaseBinned.__init__(self, model, data, constraints, options)
+     66 if error_msg:
+     67     raise ValueError(error_msg)
+---> 69 super().__init__(model=model, data=data, constraints=constraints, fit_range=None, options=options)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/zfit/core/loss.py:141, in BaseLoss.__init__(self, model, data, fit_range, constraints, options)
+    138     constraints = []
+    139 self._constraints = _constraint_check_convert(convert_to_container(constraints, list))
+--> 141 self._precompile()
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/zfit/core/loss.py:243, in BaseLoss._precompile(self)
+    241 run.assert_executing_eagerly()  # first time subtr
+    242 nevents_tot = znp.sum([d._approx_nevents for d in self.data])
+--> 243 log_offset_sum = (self._call_value(data=self.data,
+    244                                    model=self.model,
+    245                                    fit_range=self.fit_range,
+    246                                    constraints=self.constraints,
+    247                                    # presumably were not at the minimum,
+    248                                    # so the loss will decrease
+    249                                    log_offset=z.convert_to_tensor(0.)) - 1000.)
+    250 log_offset = tf.stop_gradient(- znp.divide(log_offset_sum, nevents_tot))
+    251 self._options['subtr_const_value'] = log_offset
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/zfit/core/loss.py:357, in BaseLoss._call_value(self, model, data, fit_range, constraints, log_offset)
+    356 def _call_value(self, model, data, fit_range, constraints, log_offset):
+--> 357     value = self._value(model=model,
+    358                         data=data,
+    359                         fit_range=fit_range,
+    360                         constraints=constraints,
+    361                         log_offset=log_offset)
+    362     # if self._subtractions.get('kahan') is None:
+    363     #     self._subtractions['kahan'] = value
+    364     # value_subtracted = (value[0] - self._subtractions['kahan'][0]) - (
+    365     #         value[1] - self._subtractions['kahan'][1])
+    366     # return value_subtracted
+    367     return value
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/zfit/core/loss.py:372, in BaseLoss._value(self, model, data, fit_range, constraints, log_offset)
+    370 def _value(self, model, data, fit_range, constraints, log_offset):
+    371     # try:
+--> 372     return self._loss_func(model=model, data=data, fit_range=fit_range,
+    373                            constraints=constraints, log_offset=log_offset)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/zfit/z/zextension.py:218, in FunctionWrapperRegistry.__call__.<locals>.concrete_func(*args, **kwargs)
+    216 func_to_run = function_holder.wrapped_func
+    217 try:
+--> 218     result = func_to_run(*args, **kwargs)
+    219 finally:
+    220     self.currently_traced.remove(func)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/eager/def_function.py:885, in Function.__call__(self, *args, **kwds)
+    882 compiler = "xla" if self._jit_compile else "nonXla"
+    884 with OptionalXlaContext(self._jit_compile):
+--> 885   result = self._call(*args, **kwds)
+    887 new_tracing_count = self.experimental_get_tracing_count()
+    888 without_tracing = (tracing_count == new_tracing_count)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/eager/def_function.py:933, in Function._call(self, *args, **kwds)
+    930 try:
+    931   # This is the first call of __call__, so we have to initialize.
+    932   initializers = []
+--> 933   self._initialize(args, kwds, add_initializers_to=initializers)
+    934 finally:
+    935   # At this point we know that the initialization is complete (or less
+    936   # interestingly an exception was raised) so we no longer need a lock.
+    937   self._lock.release()
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/eager/def_function.py:759, in Function._initialize(self, args, kwds, add_initializers_to)
+    756 self._lifted_initializer_graph = lifted_initializer_graph
+    757 self._graph_deleter = FunctionDeleter(self._lifted_initializer_graph)
+    758 self._concrete_stateful_fn = (
+--> 759     self._stateful_fn._get_concrete_function_internal_garbage_collected(  # pylint: disable=protected-access
+    760         *args, **kwds))
+    762 def invalid_creator_scope(*unused_args, **unused_kwds):
+    763   """Disables variable creation."""
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/eager/function.py:3066, in Function._get_concrete_function_internal_garbage_collected(self, *args, **kwargs)
+   3064   args, kwargs = None, None
+   3065 with self._lock:
+-> 3066   graph_function, _ = self._maybe_define_function(args, kwargs)
+   3067 return graph_function
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/eager/function.py:3463, in Function._maybe_define_function(self, args, kwargs)
+   3459   return self._define_function_with_shape_relaxation(
+   3460       args, kwargs, flat_args, filtered_flat_args, cache_key_context)
+   3462 self._function_cache.missed.add(call_context_key)
+-> 3463 graph_function = self._create_graph_function(args, kwargs)
+   3464 self._function_cache.primary[cache_key] = graph_function
+   3466 return graph_function, filtered_flat_args
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/eager/function.py:3298, in Function._create_graph_function(self, args, kwargs, override_flat_arg_shapes)
+   3293 missing_arg_names = [
+   3294     "%s_%d" % (arg, i) for i, arg in enumerate(missing_arg_names)
+   3295 ]
+   3296 arg_names = base_arg_names + missing_arg_names
+   3297 graph_function = ConcreteFunction(
+-> 3298     func_graph_module.func_graph_from_py_func(
+   3299         self._name,
+   3300         self._python_function,
+   3301         args,
+   3302         kwargs,
+   3303         self.input_signature,
+   3304         autograph=self._autograph,
+   3305         autograph_options=self._autograph_options,
+   3306         arg_names=arg_names,
+   3307         override_flat_arg_shapes=override_flat_arg_shapes,
+   3308         capture_by_value=self._capture_by_value),
+   3309     self._function_attributes,
+   3310     function_spec=self.function_spec,
+   3311     # Tell the ConcreteFunction to clean up its graph once it goes out of
+   3312     # scope. This is not the default behavior since it gets used in some
+   3313     # places (like Keras) where the FuncGraph lives longer than the
+   3314     # ConcreteFunction.
+   3315     shared_func_graph=False)
+   3316 return graph_function
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/framework/func_graph.py:1007, in func_graph_from_py_func(name, python_func, args, kwargs, signature, func_graph, autograph, autograph_options, add_control_dependencies, arg_names, op_return_value, collections, capture_by_value, override_flat_arg_shapes, acd_record_initial_resource_uses)
+   1004 else:
+   1005   _, original_func = tf_decorator.unwrap(python_func)
+-> 1007 func_outputs = python_func(*func_args, **func_kwargs)
+   1009 # invariant: `func_outputs` contains only Tensors, CompositeTensors,
+   1010 # TensorArrays and `None`s.
+   1011 func_outputs = nest.map_structure(convert, func_outputs,
+   1012                                   expand_composites=True)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/eager/def_function.py:668, in Function._defun_with_scope.<locals>.wrapped_fn(*args, **kwds)
+    664 with default_graph._variable_creator_scope(scope, priority=50):  # pylint: disable=protected-access
+    665   # __wrapped__ allows AutoGraph to swap in a converted function. We give
+    666   # the function a weak reference to itself to avoid a reference cycle.
+    667   with OptionalXlaContext(compile_with_xla):
+--> 668     out = weak_wrapped_fn().__wrapped__(*args, **kwds)
+    669   return out
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/zfit/_loss/binnedloss.py:371, in BinnedNLL._loss_func(self, model, data, fit_range, constraints, log_offset)
+    369     poisson_term = poisson_loss_calc(probs, values, log_offset, variances)
+    370     poisson_terms.append(poisson_term)
+--> 371 nll = znp.sum(poisson_terms)
+    373 if constraints:
+    374     constraints = z.reduce_sum([c.value() for c in constraints])
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/numpy_ops/np_array_ops.py:565, in sum(a, axis, dtype, keepdims)
+    563 @np_utils.np_doc('sum')
+    564 def sum(a, axis=None, dtype=None, keepdims=None):  # pylint: disable=redefined-builtin
+--> 565   return _reduce(
+    566       math_ops.reduce_sum,
+    567       a,
+    568       axis=axis,
+    569       dtype=dtype,
+    570       keepdims=keepdims,
+    571       tf_bool_fn=math_ops.reduce_any)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/numpy_ops/np_array_ops.py:513, in _reduce(tf_fn, a, axis, dtype, keepdims, promote_int, tf_bool_fn, preserve_bool)
+    511 if keepdims is None:
+    512   keepdims = False
+--> 513 a = asarray(a, dtype=dtype)
+    514 if ((dtype == np.bool_ or preserve_bool and a.dtype == np.bool_) and
+    515     tf_bool_fn is not None):
+    516   return tf_bool_fn(input_tensor=a, axis=axis, keepdims=keepdims)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/numpy_ops/np_array_ops.py:227, in asarray(a, dtype)
+    224 if isinstance(a, np_arrays.ndarray) and (
+    225     not dtype or dtype == a.dtype.as_numpy_dtype):
+    226   return a
+--> 227 return array(a, dtype, copy=False)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/numpy_ops/np_array_ops.py:214, in array(val, dtype, copy, ndmin)
+    212 if dtype:
+    213   dtype = np_utils.result_type(dtype)
+--> 214 return _array_internal(val, dtype, copy, ndmin)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/numpy_ops/np_array_ops.py:178, in _array_internal(val, dtype, copy, ndmin)
+    165     dtype = np_utils.result_type(result_t)
+    166   # We can't call `convert_to_tensor(result_t, dtype=dtype)` here because
+    167   # convert_to_tensor doesn't allow incompatible arguments such as (5.5, int)
+    168   # while np.array allows them. We need to convert-then-cast.
+   (...)
+    176   # supply that information so that convert_to_tensor will do best-effort
+    177   # conversion to that dtype first.
+--> 178   result_t = np_arrays.convert_to_tensor(result_t, dtype_hint=dtype)
+    179   result_t = math_ops.cast(result_t, dtype=dtype)
+    180 elif dtype:
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/numpy_ops/np_arrays.py:51, in convert_to_tensor(value, dtype, dtype_hint)
+     49 elif dtype is None and dtype_hint is None and isinstance(value, float):
+     50   dtype = np_dtypes.default_float_type()
+---> 51 return ops.convert_to_tensor(value, dtype=dtype, dtype_hint=dtype_hint)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/profiler/trace.py:163, in trace_wrapper.<locals>.inner_wrapper.<locals>.wrapped(*args, **kwargs)
+    161   with Trace(trace_name, **trace_kwargs):
+    162     return func(*args, **kwargs)
+--> 163 return func(*args, **kwargs)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/framework/ops.py:1566, in convert_to_tensor(value, dtype, name, as_ref, preferred_dtype, dtype_hint, ctx, accepted_result_types)
+   1561       raise TypeError("convert_to_tensor did not convert to "
+   1562                       "the preferred dtype: %s vs %s " %
+   1563                       (ret.dtype.base_dtype, preferred_dtype.base_dtype))
+   1565 if ret is None:
+-> 1566   ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+   1568 if ret is NotImplemented:
+   1569   continue
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/array_ops.py:1537, in _autopacking_conversion_function(v, dtype, name, as_ref)
+   1535 elif dtype != inferred_dtype:
+   1536   v = nest.map_structure(_cast_nested_seqs_to_dtype(dtype), v)
+-> 1537 return _autopacking_helper(v, dtype, name or "packed")
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/array_ops.py:1473, in _autopacking_helper(list_or_tuple, dtype, name)
+   1467     else:
+   1468       # NOTE(mrry): This is inefficient, but it enables us to
+   1469       # handle the case where the list arguments are other
+   1470       # convertible-to-tensor types, such as numpy arrays.
+   1471       elems_as_tensors.append(
+   1472           constant_op.constant(elem, dtype=dtype, name=str(i)))
+-> 1473   return gen_array_ops.pack(elems_as_tensors, name=scope)
+   1474 else:
+   1475   return converted_elems
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/ops/gen_array_ops.py:6400, in pack(values, axis, name)
+   6398   axis = 0
+   6399 axis = _execute.make_int(axis, "axis")
+-> 6400 _, _, _op, _outputs = _op_def_library._apply_op_helper(
+   6401       "Pack", values=values, axis=axis, name=name)
+   6402 _result = _outputs[:]
+   6403 if _execute.must_record_gradient():
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/framework/op_def_library.py:748, in _apply_op_helper(op_type_name, name, **keywords)
+    743 must_colocate_inputs = [val for arg, val in zip(op_def.input_arg, inputs)
+    744                         if arg.is_ref]
+    745 with _MaybeColocateWith(must_colocate_inputs):
+    746   # Add Op to graph
+    747   # pylint: disable=protected-access
+--> 748   op = g._create_op_internal(op_type_name, inputs, dtypes=None,
+    749                              name=scope, input_types=input_types,
+    750                              attrs=attr_protos, op_def=op_def)
+    752 # `outputs` is returned as a separate return value so that the output
+    753 # tensors can the `op` per se can be decoupled so that the
+    754 # `op_callbacks` can function properly. See framework/op_callbacks.py
+    755 # for more details.
+    756 outputs = op.outputs
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/framework/func_graph.py:599, in FuncGraph._create_op_internal(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_device)
+    597   inp = self.capture(inp)
+    598   captured_inputs.append(inp)
+--> 599 return super(FuncGraph, self)._create_op_internal(  # pylint: disable=protected-access
+    600     op_type, captured_inputs, dtypes, input_types, name, attrs, op_def,
+    601     compute_device)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/framework/ops.py:3561, in Graph._create_op_internal(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_device)
+   3558 # _create_op_helper mutates the new Operation. `_mutation_lock` ensures a
+   3559 # Session.run call cannot occur between creating and mutating the op.
+   3560 with self._mutation_lock():
+-> 3561   ret = Operation(
+   3562       node_def,
+   3563       self,
+   3564       inputs=inputs,
+   3565       output_types=dtypes,
+   3566       control_inputs=control_inputs,
+   3567       input_types=input_types,
+   3568       original_op=self._default_original_op,
+   3569       op_def=op_def)
+   3570   self._create_op_helper(ret, compute_device=compute_device)
+   3571 return ret
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/framework/ops.py:2041, in Operation.__init__(self, node_def, g, inputs, output_types, control_inputs, input_types, original_op, op_def)
+   2039   if op_def is None:
+   2040     op_def = self._graph._get_op_def(node_def.op)
+-> 2041   self._c_op = _create_c_op(self._graph, node_def, inputs,
+   2042                             control_input_ops, op_def)
+   2043   name = compat.as_str(node_def.name)
+   2045 self._traceback = tf_stack.extract_stack_for_node(self._c_op)
+
+File ~/anaconda3/envs/tf/lib/python3.9/site-packages/tensorflow/python/framework/ops.py:1883, in _create_c_op(graph, node_def, inputs, control_inputs, op_def)
+   1880   c_op = pywrap_tf_session.TF_FinishOperation(op_desc)
+   1881 except errors.InvalidArgumentError as e:
+   1882   # Convert to ValueError for backwards compatibility.
+-> 1883   raise ValueError(str(e))
+   1885 return c_op
+
+ValueError: Dimension 0 in both shapes must be equal, but are 50 and 40. Shapes are [50] and [40].
+	From merging shape 0 with other shapes. for '{{node packed_9}} = Pack[N=2, T=DT_DOUBLE, axis=0](PartitionedCall, PartitionedCall_1)' with input shapes: [50], [40].
