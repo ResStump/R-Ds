@@ -69,10 +69,11 @@ def plot_contour(param1, param2, range1, range2, NLL, xlabel=None, ylabel=None,
     )
     Z = np.empty(X.shape)
     
+    j = 0 # j needs to be assigned beforehand such that the for loops work
     for i in range(num):
-        for j in range(num):
+        param2.set_value(Y[i, j]) # this function is expensive
+        for j in range(num):      # -> taken out of this loop
             param1.set_value(X[i, j])
-            param2.set_value(Y[i, j])
             Z[i, j] = NLL.value()
     # set parameter values back to optimized values
     param1.set_value(param1_result)
@@ -134,6 +135,11 @@ tree_CMS['pt_miss'] = tree_CMS['ds_m_pt']*m_Bs/tree_CMS['ds_m_mass'] \
                       - tree_CMS['km_pt'] - tree_CMS['kp_pt'] \
                       - tree_CMS['pi_pt']  - tree_CMS['mu_pt']
 
+# add q2 a second time to look at how uncertainty change, when used the same
+# data twice
+tree_Reco['q2_copy'] = np.copy(tree_Reco['q2'])
+tree_CMS['q2_copy'] = np.copy(tree_CMS['q2'])
+
 
 # Filtering
 ###########
@@ -168,11 +174,8 @@ filterAll()
 # Parameters #
 ##############
 
-# total number of events in data
-N_tot = tree_CMS['q2'].size - np.isnan(tree_CMS['q2']).sum()
-
 # list of observables that are used from the trees for the optimization
-keys_obs = ['q2', 'e_star_mu3']
+keys_obs = ['q2', 'pt_miss']#, 'q2_copy']#, 'e_star_mu3']
 
 # list of signals in the tree
 keys_sig = ['-1', '0', '1', '2', '3']
@@ -184,24 +187,28 @@ labels = {'-1': 'background',
           '2': r"$D_s \, \tau \nu$ channel",
           '3': r"$D^*_s \tau \nu$ channel"}
 
+# total number of events in data
+N_tot = tree_CMS['q2'].size - np.isnan(tree_CMS['q2']).sum()
+
 # True parameters
 N_sig_true = {sig: (tree_Reco['sig']==int(sig)).sum() for sig in keys_sig}
 R_true = N_sig_true['2']/N_sig_true['0']
 R_star_true = N_sig_true['3']/N_sig_true['1']
-N_true = N_sig_true['0']+N_sig_true['2']
-N_star_true = N_sig_true['1']+N_sig_true['3']
+N_true = N_sig_true['0'] + N_sig_true['2']
+N_star_true = N_sig_true['1'] + N_sig_true['3']
 
 
-# parameters can only be allocated once -> only run this part of the code, if
-# the parameters don't already exist
+# parameters can only be allocated once -> use try and except to only run this
+# part of the code, if the parameters don't already exist
 try:
     R
 except NameError:
     # Parameters that are optimized
-    R = zfit.Parameter('R', R_true + 0.02, -1, 100)
-    R_star = zfit.Parameter('R_star', R_star_true - 0.01, -1, 100)
-    N = zfit.Parameter('N', N_true + 5000, 0, 1e6, step_size=1) # N_0 + N_2
-    N_star = zfit.Parameter('N_star', N_star_true - 8000, 0, 1e6,
+    R = zfit.Parameter('R', R_true, -1, 10, step_size=0.0001)
+    R_star = zfit.Parameter('R_star', R_star_true, -1, 10,
+                            step_size=0.0001)
+    N = zfit.Parameter('N', N_true, 0, 1e6, step_size=1) # N_0 + N_2
+    N_star = zfit.Parameter('N_star', N_star_true, 0, 1e6,
                             step_size=1) # N_1 + N_3
 
     # Composed parameters
@@ -228,10 +235,10 @@ except NameError:
 
 # gaussian constraints
 R_exp = R_true # expected value
-DeltaR = R_true*0.1 # 10% uncertainty for R_exp
+DeltaR = R_true*0.2 # 20% uncertainty for R_exp
 
 R_star_exp = R_star_true # expected value
-DeltaR_star = R_star_true*0.1 # 10% uncertainty for R_star_exp
+DeltaR_star = R_star_true*0.2 # 20% uncertainty for R_star_exp
 
 constraints = []
 """ # [zfit.constraint.GaussianConstraint(R, R_exp, DeltaR),
@@ -243,14 +250,13 @@ constraints = []
 # creation of zfit model from Data #
 ####################################
 
-# range of the observables
+# range of the observables for zfit and for plotting (if needed)
 ranges = {obs: (np.nanmin(tree_Reco[obs]), np.nanmax(tree_Reco[obs]))
           for obs in keys_obs}
-
+plot_ranges = {'pt_miss': (-1.0685997, 70)}
 
 # number of bins
-# only works if number of bins are all equal?
-bins = {obs: 25 for obs in keys_obs}
+bins = {'q2': 25, 'pt_miss': 200, 'q2_copy': 25, 'e_star_mu3': 30}
 
 # create hists from reco data
 hists = dict()
@@ -264,8 +270,10 @@ for obs in keys_obs:
 
 # plot of hists
 def obs_plot_sig(obs):
+    if obs in plot_ranges.keys():
+            plt.xlim(plot_ranges[obs])
     for sig in keys_sig:
-        hists[obs][sig].plot(density=True, yerr=False, label=f'signal {sig}')
+        hists[obs][sig].plot(density=True, yerr=False, label=labels[sig])
     plt.legend()
     plt.show()
     return
@@ -300,10 +308,10 @@ NLL = zfit.loss.BinnedNLL(model=histPDFs.values(), data=data_zfit.values(),
                           constraints=constraints)
 
 # set initial parameter values
-"""R.set_value(R_true+0.05)
-R_star.set_value(R_star_true-0.03)
-N.set_value(N_true+50000)
-N_star.set_value(N_star_true-80000)"""
+R.set_value(R_true)
+R_star.set_value(R_star_true)
+N.set_value(N_true)
+N_star.set_value(N_star_true)
 
 
 # %%############
@@ -312,6 +320,8 @@ N_star.set_value(N_star_true-80000)"""
 
 # plots before minimization
 """for obs in keys_obs:
+    if obs in plot_ranges.keys():
+        plt.xlim(plot_ranges[obs]) 
     plot_hist_model_and_data(histPDFs[obs], data_zfit[obs])
     plt.title('Befor minimizing')
     plt.show()"""
@@ -319,22 +329,35 @@ N_star.set_value(N_star_true-80000)"""
 # selection of the minimizer
 minimizer = zfit.minimize.Minuit()#gradient=True)
 
-# run minimizer until it converged and until the parameters don't change
-# much anymore
+# run minimizer for first time
 result = minimizer.minimize(NLL)
+# calculate uncertainty of result, then minimize again and calculate the
+# uncertainty again. For some reason this reduces the uncertainty of the result
+# such that it is close to the 2*DeltaNLL = 1 value
+result.hesse()
 n = 1
-temp_results = np.array(result.values)
+# run minimizer until it converged but at least 1 additional time for the hesse
+# (see comment above)
+while not result.converged or n==1:
+    result = minimizer.minimize(NLL)
+    n += 1
+
+"""# run minimizer until it converged and until the parameters don't change
+# much anymoretemp_results = np.array(result.values)
 params_stable = False
 while not result.converged and not params_stable:
     result = minimizer.minimize(NLL)
     n += 1
-    params_stable = np.allclose(np.array(result.values), temp_results)
-    temp_results = np.array(result.values)
+    params_stable = np.allclose(np.array(result.values), temp_results,
+                                rtol=1e-5, atol=1e-8)
+    temp_results = np.array(result.values)"""
 
 print(f'Number of iterations until the minimizer converged: {n}')
 
 # plots after minimization
 """for obs in keys_obs:
+    if obs in plot_ranges.keys():
+        plt.xlim(plot_ranges[obs])
     plot_hist_model_and_data(histPDFs[obs], data_zfit[obs])
     plt.title('After minimizing')
     plt.show()"""
@@ -346,10 +369,11 @@ print(f'Number of iterations until the minimizer converged: {n}')
 
 # plot of the result split into signals
 for obs in keys_obs:
+    if obs in plot_ranges.keys():
+        plt.xlim(plot_ranges[obs])
     plot_hist_data_sig(obs)
     plt.show()
 
-# calculate uncertainty of result
 result.hesse()
 
 # results
@@ -389,10 +413,8 @@ plt.show()
 # ToDos #
 #########
 # - Create selection to handle (artificial) K pi ambiguity
-# - Problem: # bin for the two obs somehow have to be equal,
-#   but should not be!!!!!
 # - Also plot 2 sigma contour? i.e. 2*DeltaNLL = 4 = 2**2
-# - Look at error from hesse(), does it change when multiple times applied
+# - Remove q2_copy from code if no longer needed (tree and bins)
 
 
 
