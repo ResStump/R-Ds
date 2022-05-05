@@ -13,7 +13,6 @@ import zfit
 # Plotting functions #
 ######################
 
-
 def plot_hist_model_and_data(model, data_zfit):
     """Plots a histogram of the model with the current parameters and of 
     data_zfit"""
@@ -23,12 +22,12 @@ def plot_hist_model_and_data(model, data_zfit):
     plt.legend()
     return
 
-def plot_hist_data_sig(obs):
+def plot_stacked_hist(obs):
     """Plots a stacked histogram of the different signals for the observable
     obs. The number of events per signal are the current parameters"""
     bins = hists[obs]['-1'].to_numpy()[1]
-    counts = [params[sig].value()*hists[obs][sig].density()
-              for sig in keys_sig]
+    counts = [param.value()/h.sum()*h.counts()
+              for param, h in zip(params.values(), hists[obs].values())]
     mplhep.histplot(counts, bins, stack=True, label=labels.values(),
                     histtype='fill')
     plt.xlabel(obs)
@@ -102,7 +101,7 @@ def plot_contour(param1, param2, range1, range2, NLL, xlabel=None, ylabel=None,
 
 # list of branches in the CMS tree that are used
 keys_tree_CMS = ['q2', 'e_star_mu3'] # observables
-keys_tree_CMS += ['ds_m_mass'] # filtering
+keys_tree_CMS += ['ds_m_mass', 'mu_bs_dxy_sig'] # filtering
 keys_tree_CMS += ['ds_m_pt', 'mu_pt', 'kp_pt', 'km_pt', 'pi_pt'] # pt_miss
 
 # open CMS root file using lazy and save required branches in the CMS tree
@@ -144,30 +143,34 @@ tree_CMS['q2_copy'] = np.copy(tree_CMS['q2'])
 # Filtering
 ###########
 
-# index for which bool_arr != True are set to nan in tree
-def tree_filtering(tree, bool_arr):
-    bool_arr = np.logical_not(bool_arr) # inverting the condition
-    for k in tree.keys():
-        if k == 'sig': # don't apply filter to 'sig'
-            continue
-        tree[k][bool_arr] = np.nan
-    return
-
 filters_Reco = dict()
 filters_CMS = dict()
+
 # cut for B_s mass at 5.36688 GeV (PDG, Fit)
-m_Bs = 5.36688 # [GeV]
 filters_Reco['ds_m_mass'] = tree_Reco['ds_m_mass'] <= m_Bs
 filters_CMS['ds_m_mass'] = tree_CMS['ds_m_mass'] <= m_Bs
 
-def filterAll():
-    for bool_arr in filters_Reco.values():
-        tree_filtering(tree_Reco, bool_arr)
-    for bool_arr in filters_CMS.values():
-        tree_filtering(tree_CMS, bool_arr)
+#filters_Reco['mu_bs_dxy_sig'] = np.abs(tree_Reco['mu_bs_dxy_sig']) > 5
+#filters_CMS['mu_bs_dxy_sig'] = np.abs(tree_Reco['mu_bs_dxy_sig']) > 5
+
+
+# Other filters to apply:
+# tree->Draw("ds_mass", "abs(mu_bs_dxy_sig)>5 & mu_pt>8 & HLT_Mu7_IP4 & mu_rel_iso<.2 & mu_charge * pi_charge<0 & ds_vtx_prob>0.1 & cos3D_ds_m>0.995 &phi_vtx_prob>0.1 & & abs(phi_mass-1.020)<0.01  & lxyz_ds_m_sig>10", "hist")
+
+# index for which bool_arr != True are removed from all entries in tree
+def filterOne(tree, bool_arr):
+    for k in tree.keys():
+        tree[k] = tree[k][bool_arr]
     return
 
-filterAll()
+def filterAll(tree, filters):
+    bool_arr = np.all(list(filters.values()), axis=0)
+    for k in tree.keys():
+        tree[k] = tree[k][bool_arr]
+    return
+
+filterAll(tree_Reco, filters_Reco)
+filterAll(tree_CMS, filters_CMS)
 
 
 # %%##########
@@ -270,10 +273,10 @@ for obs in keys_obs:
 
 # plot of hists
 def obs_plot_sig(obs):
-    if obs in plot_ranges.keys():
-            plt.xlim(plot_ranges[obs])
     for sig in keys_sig:
         hists[obs][sig].plot(density=True, yerr=False, label=labels[sig])
+    if obs in plot_ranges.keys():
+            plt.xlim(plot_ranges[obs])
     plt.legend()
     plt.show()
     return
@@ -310,8 +313,10 @@ NLL = zfit.loss.BinnedNLL(model=histPDFs.values(), data=data_zfit.values(),
 # set initial parameter values
 R.set_value(R_true)
 R_star.set_value(R_star_true)
+R.step_size, R_star.step_size = 0.0001, 0.0001
 N.set_value(N_true)
 N_star.set_value(N_star_true)
+N.step_size, N_star.step_size = 1, 1
 
 
 # %%############
@@ -369,9 +374,9 @@ print(f'Number of iterations until the minimizer converged: {n}')
 
 # plot of the result split into signals
 for obs in keys_obs:
+    plot_stacked_hist(obs)
     if obs in plot_ranges.keys():
         plt.xlim(plot_ranges[obs])
-    plot_hist_data_sig(obs)
     plt.show()
 
 result.hesse()
@@ -412,9 +417,10 @@ plt.show()
 #########
 # ToDos #
 #########
-# - Create selection to handle (artificial) K pi ambiguity
+# - Add filters (see above)
 # - Also plot 2 sigma contour? i.e. 2*DeltaNLL = 4 = 2**2
 # - Remove q2_copy from code if no longer needed (tree and bins)
+# - delete function "plot_hist_data_sig2" if not needed anymore
 
 
 
