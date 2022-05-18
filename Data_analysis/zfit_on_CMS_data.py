@@ -95,10 +95,13 @@ def plot_contour(param1, param2, range1, range2, NLL, xlabel=None, ylabel=None,
 # Other functions #
 ###################
 
-def print_params():
+def print_params(rounded=True):
     print('Resulting yields:')
     for k, p in params.items():
-        print(f'Signal {k}:', p.value().numpy())
+        value = p.value().numpy()
+        if rounded:
+            value = round(p.value().numpy())
+        print(f'Signal {k}:', value)
 
 def det_ranges(obs):
     """Function that determines the maximum and minimum values of entry obs
@@ -109,7 +112,7 @@ def det_ranges(obs):
 
 
 # %%#####################################
-# Data import, processing and filtering #
+# Data import, filtering and processing #
 #########################################
 
 # constants
@@ -213,12 +216,18 @@ tree_Reco_tau = root_tree_Reco_tau.arrays(keys_tree_Reco, cut=selection,
                                           aliases=aliases, library="np")
 
 
+# Processing
+############
+# shift ds_mass in Reco data
+tree_Reco['ds_mass'] = 0.999*tree_Reco['ds_mass']
+
+
 # %%##########
 # Parameters #
 ##############
 
 # list of observables that are used from the trees for the optimization
-keys_obs = ['q2', 'e_star_mu']#, 'ds_mass', 'pt_miss']
+keys_obs = ['q2', 'ds_mass']#, 'e_star_mu', 'pt_miss']
 
 # list of signals in the tree
 keys_sig = ['-2', '-1', '0', '1', '2', '3']
@@ -231,18 +240,20 @@ labels = {'-2': 'comb. bkg.',
           '2': r"$B_s \rightarrow D_s \, \tau \nu$",
           '3': r"$B_s \rightarrow D^*_s \tau \nu$"}
 
-# total number of events in data and in reco data
+# total number of events in data
 N_tot_CMS = tree_CMS['q2'].size
-N_tot_Reco = tree_Reco['q2'].size
 
-# initial values for the parameters (scaled to # events in data)
-N_sig_init = {sig: (tree_Reco['sig']==int(sig)).sum()*N_tot_CMS/N_tot_Reco
-                   for sig in keys_sig}
-R_init      = N_sig_init['2']/N_sig_init['0']
-R_star_init = N_sig_init['3']/N_sig_init['1']
-N_0_init    = 0.55*N_sig_init['0']
-N_1_init    = 0.55*N_sig_init['1']
+# initial values for the parameters from Reco data and comb bkg
+# (scaled to rasonable values)
+N_sig_Reco = {sig: (tree_Reco['sig']==int(sig)).sum() for sig in keys_sig}
+R_init      = N_sig_Reco['2']/N_sig_Reco['0']
+R_star_init = N_sig_Reco['3']/N_sig_Reco['1']
+N_0_init    = 5*N_sig_Reco['0']
+N_1_init    = 5*N_sig_Reco['1']
 N_comb_init = 1.45*tree_comb['q2'].size
+
+# ratio between number of mu* and mu events (to recudce # free params)
+N_1_N_0_ratio = N_sig_Reco['1']/N_sig_Reco['0']
 
 # parameters can only be allocated once -> use try and except to only run this
 # part of the code, if the parameters don't already exist
@@ -253,18 +264,18 @@ except NameError:
     R = zfit.Parameter('R', R_init) # R(Ds)
     R_star = zfit.Parameter('R_star', R_star_init) # R(Ds*)
     N_0 = zfit.Parameter('N_0', N_0_init,) # sig 0
-    N_1 = zfit.Parameter('N_1', N_1_init,) # sig 1
+    # N_1 = zfit.Parameter('N_1', N_1_init,) # sig 1
     N_comb = zfit.Parameter('N_comb', N_comb_init) # combinatorial background
 
     # Functions for composed parameters
     def N_m1_(R, R_star, N_0, N_1, N_comb):
         return N_tot_CMS - N_0*(R+1) - N_1*(R_star+1) - N_comb
-        #return zfit.z.numpy.max([N_tot_CMS-N_0*(R+1)-N_1*(R_star+1)-N_comb,
-        #                         1e-6])
+    N_1_ = lambda N_0: N_1_N_0_ratio*N_0
     N_2_ = lambda R, N_0: R*N_0
     N_3_ = lambda R_star, N_1: R_star*N_1
 
     # Composed parameters
+    N_1 = zfit.ComposedParameter('N_1', N_1_, [N_0]) # sig 1
     N_m1 = zfit.ComposedParameter('N_m1', N_m1_,
                                   [R, R_star, N_0, N_1, N_comb]) # bkg
     N_2 = zfit.ComposedParameter('N_2', N_2_, [R, N_0]) # sig 2
@@ -284,21 +295,26 @@ N_comb.lower, N_comb.upper = 0, 0.8*N_tot_CMS
 R.set_value(R_init)
 R_star.set_value(R_star_init)
 N_0.set_value(N_0_init)
-N_1.set_value(N_1_init)
+# N_1.set_value(N_1_init)
 N_comb.set_value(N_comb_init)
 
 # set stepsizes
 R.step_size, R_star.step_size = 1e-4, 1e-4
-N_0.step_size, N_1.step_size, N_comb.step_size = 1, 1, 1
+N_0.step_size = 1
+# N_1.step_size = 1
+N_comb.step_size = 1
 
-"""# initial values for the parameters (scaled to # events in data)
-N_sig_init = {sig: (tree_Reco['sig']==int(sig)).sum()*N_tot_CMS/N_tot_Reco
-                   for sig in keys_sig}
+"""# initial values for the parameters from Reco data and comb bkg
+# (scaled to rasonable values)
+N_sig_init = {sig: (tree_Reco['sig']==int(sig)).sum() for sig in keys_sig}
 R_init      = N_sig_init['2']/N_sig_init['0']
 R_star_init = N_sig_init['3']/N_sig_init['1']
-N_init      = 0.70*N_sig_init['0'] + N_sig_init['2']
-N_star_init = 0.70*N_sig_init['1'] + N_sig_init['3']
-N_comb_init = 1.30*tree_comb['q2'].size
+N_init      = 5.0*(N_sig_init['0'] + N_sig_init['2'])
+N_star_init = 5.0*(N_sig_init['1'] + N_sig_init['3'])
+N_comb_init = 1.45*tree_comb['q2'].size
+N_star_N_ratio = (N_sig_init['1'] + N_sig_init['3']) \
+                 /(N_sig_init['0'] + N_sig_init['2'])
+
 
 # parameters can only be allocated once -> use try and except to only run this
 # part of the code, if the parameters don't already exist
@@ -330,11 +346,11 @@ except NameError:
 params = {'-2': N_comb, '-1': N_m1, '0': N_0, '1': N_1, '2': N_2, '3': N_3}
 
 # set parameter ranges
-R.lower, R.upper           = 0, 0.1
-R_star.lower, R_star.upper = 0, 0.1
+R.lower, R.upper           = 0, 0.7
+R_star.lower, R_star.upper = 0, 0.4
 N.lower, N.upper           = 0, N_tot_CMS
 N_star.lower, N_star.upper = 0, N_tot_CMS
-N_comb.lower, N_comb.upper = 0, 100_000
+N_comb.lower, N_comb.upper = 0, 0.8*N_tot_CMS
 
 # set initial parameter values
 R.set_value(R_init)
@@ -440,7 +456,10 @@ for obs in keys_obs:
                     color='k')
     if obs in plot_ranges:
         plt.xlim(plot_ranges[obs])
-    plt.legend()
+    if obs in legend_pos:
+        plt.legend(loc=legend_pos[obs])
+    else:
+        plt.legend()
     plt.title('Initial values')
     plt.show()
 
@@ -448,14 +467,6 @@ for obs in keys_obs:
 # %%############
 # miminization #
 ################
-
-"""# plots before minimization
-for obs in keys_obs:
-    if obs in plot_ranges.keys():
-        plt.xlim(plot_ranges[obs]) 
-    plot_hist_model_and_data(histPDFs[obs], data_zfit[obs])
-    plt.title('Befor minimizing')
-    plt.show()"""
 
 # selection of the minimizer
 minimizer = zfit.minimize.Minuit()#gradient=True)
@@ -474,14 +485,6 @@ while not result.converged or n==1:
     n += 1
 
 print(f'Number of iterations until the minimizer converged: {n}')
-
-# plots after minimization
-"""for obs in keys_obs:
-    if obs in plot_ranges.keys():
-        plt.xlim(plot_ranges[obs])
-    plot_hist_model_and_data(histPDFs[obs], data_zfit[obs])
-    plt.title('After minimizing')
-    plt.show()"""
 
 
 # %%#######
@@ -549,7 +552,8 @@ plt.show()
 # ToDos #
 #########
 # - Also plot 2 sigma contour? i.e. 2*DeltaNLL = 4 = 2**2
-# - Add plot of ds_mass, even if its no an observable used for minimization
+# - Change allocation of parameters such that the other params don't depend 
+#   on N_1
 
 
 
