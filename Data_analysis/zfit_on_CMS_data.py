@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import mplhep
 import hist
 import os
-os.environ["ZFIT_DISABLE_TF_WARNINGS"] = "1" # disables first zfit warning
+#os.environ["ZFIT_DISABLE_TF_WARNINGS"] = "1" # disables first zfit warning
 import zfit
 
 
@@ -34,6 +34,10 @@ def plot_stacked_hist(obs):
     plt.ylabel('Number of events')
     plt.legend()
     return
+
+
+# Likelyhood scanns
+###################
 
 def plot_profile(param, range, NLL, name=None, num=50):
     """Plots the profile of the parameter param"""
@@ -218,8 +222,15 @@ tree_Reco_tau = root_tree_Reco_tau.arrays(keys_tree_Reco, cut=selection,
 
 # Processing
 ############
+
 # shift ds_mass in Reco data
-tree_Reco['ds_mass'] = 0.999*tree_Reco['ds_mass']
+ds_mass_shift = 0.999
+tree_Reco['ds_mass'] = ds_mass_shift*tree_Reco['ds_mass']
+tree_Reco_tau['ds_mass'] = ds_mass_shift*tree_Reco_tau['ds_mass']
+
+# shift q2 in comb bkg
+q2_shift = 1.01
+tree_comb['q2'] = q2_shift*tree_comb['q2']
 
 
 # %%##########
@@ -246,8 +257,8 @@ N_tot_CMS = tree_CMS['q2'].size
 # initial values for the parameters from Reco data and comb bkg
 # (scaled to rasonable values)
 N_sig_Reco = {sig: (tree_Reco['sig']==int(sig)).sum() for sig in keys_sig}
-R_init      = N_sig_Reco['2']/N_sig_Reco['0']
-R_star_init = N_sig_Reco['3']/N_sig_Reco['1']
+R_init      = 5*N_sig_Reco['2']/N_sig_Reco['0']
+R_star_init = 5*N_sig_Reco['3']/N_sig_Reco['1']
 N_0_init    = 5*N_sig_Reco['0']
 N_1_init    = 5*N_sig_Reco['1']
 N_comb_init = 1.45*tree_comb['q2'].size
@@ -285,8 +296,8 @@ except NameError:
 params = {'-2': N_comb, '-1': N_m1, '0': N_0, '1': N_1, '2': N_2, '3': N_3}
 
 # set parameter ranges
-R.lower, R.upper           = 0, 0.7
-R_star.lower, R_star.upper = 0, 0.4
+R.lower, R.upper           = 0, 0.5
+R_star.lower, R_star.upper = 0, 0.2
 N_0.lower, N_0.upper       = 0, 0.5*N_tot_CMS
 N_1.lower, N_1.upper       = 0, 0.5*N_tot_CMS
 N_comb.lower, N_comb.upper = 0, 0.8*N_tot_CMS
@@ -298,12 +309,13 @@ N_0.set_value(N_0_init)
 # N_1.set_value(N_1_init)
 N_comb.set_value(N_comb_init)
 
-# set stepsizes
+# set initial stepsizes
 R.step_size, R_star.step_size = 1e-4, 1e-4
 N_0.step_size = 1
 # N_1.step_size = 1
 N_comb.step_size = 1
 
+# other way to choose the parameters (not used) 
 """# initial values for the parameters from Reco data and comb bkg
 # (scaled to rasonable values)
 N_sig_init = {sig: (tree_Reco['sig']==int(sig)).sum() for sig in keys_sig}
@@ -391,7 +403,7 @@ plot_ranges = {'pt_miss': (-1.0685997, 70)}
 legend_pos = {'q2': 2}
 
 # number of bins
-bins = {'q2': 25, 'pt_miss': 200, 'e_star_mu': 20, 'ds_mass': 25}
+bins = {'q2': 15, 'pt_miss': 200, 'e_star_mu': 20, 'ds_mass': 20}
 
 # create hists from reco data and additional tau signals
 hists = dict()
@@ -468,6 +480,16 @@ for obs in keys_obs:
 # miminization #
 ################
 
+"""# selection of the minimizer
+minimizer = zfit.minimize.Minuit()#gradient=True)
+
+# run minimizer
+result = minimizer.minimize(NLL)
+
+# calculate uncertainty of the parameters
+result.hesse()"""
+
+
 # selection of the minimizer
 minimizer = zfit.minimize.Minuit()#gradient=True)
 
@@ -498,7 +520,10 @@ for obs in keys_obs:
                     color='k')
     if obs in plot_ranges:
         plt.xlim(plot_ranges[obs])
-    plt.legend()
+    if obs in legend_pos:
+        plt.legend(loc=legend_pos[obs])
+    else:
+        plt.legend()
     plt.title('Result')
     plt.show()
 
@@ -554,6 +579,8 @@ plt.show()
 # - Also plot 2 sigma contour? i.e. 2*DeltaNLL = 4 = 2**2
 # - Change allocation of parameters such that the other params don't depend 
 #   on N_1
+# - Include detector efficiency. The values used in the MC are:
+#       R(Ds) = 0.381, R(Ds*) = 0.327
 
 
 
