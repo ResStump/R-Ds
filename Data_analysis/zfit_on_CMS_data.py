@@ -2,11 +2,12 @@
 import numpy as np
 import uproot
 import matplotlib.pyplot as plt
+plt.rcParams['savefig.bbox'] = 'tight'
 import mplhep
+plt.style.use(mplhep.style.ROOT)
 import hist
-import os
-#os.environ["ZFIT_DISABLE_TF_WARNINGS"] = "1" # disables first zfit warning
 import zfit
+from scipy.stats import rv_histogram
 
 
 ######################
@@ -30,7 +31,8 @@ def plot_stacked_hist(obs):
               for param, h in zip(params.values(), hists[obs].values())]
     mplhep.histplot(counts, bins, stack=True, label=labels.values(),
                     histtype='fill')
-    plt.xlabel(obs)
+    plt.minorticks_on()
+    plt.xlabel(labels_obs[obs])
     plt.ylabel('Number of events')
     plt.legend()
     return
@@ -95,6 +97,7 @@ def plot_contour(param1, param2, range1, range2, NLL, xlabel=None, ylabel=None,
     plt.title('$2*\Delta\,$NLL$=1.0$ contour')
     return
 
+
 ###################
 # Other functions #
 ###################
@@ -114,6 +117,75 @@ def det_ranges(obs):
     maximum = max(np.nanmax(tree_Reco[obs]), np.nanmax(tree_Reco_tau[obs]))
     return (minimum, maximum)
 
+def weights_for_comb_bkg(obs, nbins=None, make_plots=False):
+    """Returns the weights for the combinatorial background of the observable
+    obs to correct the difference in shape for same and opposite mu and pi
+    charge."""
+    # selection to isolate the combinatorial background from the other signals
+    selection = [
+        f'ds_m_mass<={m_Bs}',
+        'mu_pt>8',
+        'mu_id_medium==1',
+        'abs(mu_bs_dxy_sig)>5',
+        'k1_pt>1.',
+        'k2_pt>1.',
+        'pi_pt>1.',
+        'phi_vtx_prob>0.1',
+        'ds_vtx_prob>0.1',
+        'cos3D_ds_m>0.995',
+        'HLT_Mu7_IP4==1',
+        'pt_miss>0',
+        'mu_charge*pi_charge<0',
+        'mu_rel_iso>0.3',
+        'lxyz_ds_m_sig<10',
+        'lxyz_ds_sig<10',
+        #f'abs(ds_mass - {m_Ds})>0.01',
+        ]
+    # convert selection to a string
+    selection = '(' + ') & ('.join(selection) + ')'
+
+    # import of the comb. bkg. with opposite mu and pi charge
+    comb_opposite = root_tree_CMS.arrays(obs, cut=selection, aliases=aliases,
+                                            library="np")[obs]
+
+    # import of the comb. bkg. with opposite mu and pi charge
+    selection = selection.replace('mu_charge*pi_charge<0',
+                                        'mu_charge*pi_charge>0')
+    comb_same = root_tree_CMS.arrays(obs, cut=selection, aliases=aliases,
+                                        library="np")[obs]
+
+    # choose bins
+    if not nbins:
+        nbins = bins[obs]
+
+    # calculation the histogram
+    counts_opposite, binning = np.histogram(comb_opposite, nbins, ranges[obs],
+                                            density=True)
+    counts_same, binning = np.histogram(comb_same, nbins, ranges[obs],
+                                        density=True)
+
+    # determine the weights of the bins as the ratio between the counts
+    weights_binned = counts_opposite/counts_same
+    # set possible nans to one
+    weights_binned = np.nan_to_num(weights_binned, nan=1.0)
+
+    if make_plots:
+        plt.hist(comb_same, bins[obs], density=True, range=ranges[obs],
+                 label='same charge', histtype='step')
+        plt.hist(comb_opposite, bins[obs], density=True, range=ranges[obs],
+                 label='opposite charge', histtype='step')
+        plt.legend(), plt.title('comb_bkg')
+        plt.show()
+        mplhep.histplot(weights_binned, binning)
+        plt.title('Weights')
+        plt.show()
+
+    # calculate weights for the individual events
+    weights = rv_histogram((weights_binned, binning)).pdf(tree_comb[obs])
+    
+    # rescale weights such that np.mean(weights) == 1
+    return weights/np.mean(weights)
+
 
 # %%#####################################
 # Data import, filtering and processing #
@@ -121,6 +193,7 @@ def det_ranges(obs):
 
 # constants
 m_Bs = 5.36688 # [GeV]
+m_Ds = 1.96834 # [GeV]
 
 # filtering
 ###########
@@ -228,10 +301,6 @@ ds_mass_shift = 0.999
 tree_Reco['ds_mass'] = ds_mass_shift*tree_Reco['ds_mass']
 tree_Reco_tau['ds_mass'] = ds_mass_shift*tree_Reco_tau['ds_mass']
 
-# shift q2 in comb bkg
-q2_shift = 1.01
-tree_comb['q2'] = q2_shift*tree_comb['q2']
-
 
 # %%##########
 # Parameters #
@@ -251,20 +320,33 @@ labels = {'-2': 'comb. bkg.',
           '2': r"$B_s \rightarrow D_s \, \tau \nu$",
           '3': r"$B_s \rightarrow D^*_s \tau \nu$"}
 
+# x labels of the different observables
+labels_obs = {'q2': '$Q^2$ [GeV$^2$]',
+          'ds_mass': '$m_{D_s}$ [GeV]'}
+
+
 # total number of events in data
 N_tot_CMS = tree_CMS['q2'].size
 
+# number of events per signal in Reco data
+N_sig_Reco = {sig: (tree_Reco['sig']==int(sig)).sum() for sig in keys_sig}
+
+# correctons for R, R_star (to include deterctor efficiency, etc.)
+R_MC = 0.381
+R_star_MC = 0.327
+epsilon = R_MC*N_sig_Reco['0']/N_sig_Reco['2']
+epsilon_star = R_star_MC*N_sig_Reco['1']/N_sig_Reco['3']
+
 # initial values for the parameters from Reco data and comb bkg
 # (scaled to rasonable values)
-N_sig_Reco = {sig: (tree_Reco['sig']==int(sig)).sum() for sig in keys_sig}
-R_init      = 5*N_sig_Reco['2']/N_sig_Reco['0']
-R_star_init = 5*N_sig_Reco['3']/N_sig_Reco['1']
+R_init      = R_MC
+R_star_init = R_star_MC
 N_0_init    = 5*N_sig_Reco['0']
 N_1_init    = 5*N_sig_Reco['1']
-N_comb_init = 1.45*tree_comb['q2'].size
+N_comb_init = 1.58*tree_comb['q2'].size
 
 # ratio between number of mu* and mu events (to recudce # free params)
-N_1_N_0_ratio = N_sig_Reco['1']/N_sig_Reco['0']
+N_1_N_0_ratio_Reco = N_sig_Reco['1']/N_sig_Reco['0']
 
 # parameters can only be allocated once -> use try and except to only run this
 # part of the code, if the parameters don't already exist
@@ -275,29 +357,32 @@ except NameError:
     R = zfit.Parameter('R', R_init) # R(Ds)
     R_star = zfit.Parameter('R_star', R_star_init) # R(Ds*)
     N_0 = zfit.Parameter('N_0', N_0_init,) # sig 0
-    # N_1 = zfit.Parameter('N_1', N_1_init,) # sig 1
+    N_1 = zfit.Parameter('N_1', N_1_init,) # sig 1
     N_comb = zfit.Parameter('N_comb', N_comb_init) # combinatorial background
 
     # Functions for composed parameters
     def N_m1_(R, R_star, N_0, N_1, N_comb):
-        return N_tot_CMS - N_0*(R+1) - N_1*(R_star+1) - N_comb
-    N_1_ = lambda N_0: N_1_N_0_ratio*N_0
-    N_2_ = lambda R, N_0: R*N_0
-    N_3_ = lambda R_star, N_1: R_star*N_1
+        return N_tot_CMS-N_0*(R/epsilon+1)-N_1*(R_star/epsilon_star+1)-N_comb
+    # N_1_ = lambda N_0: N_1_N_0_ratio_Reco*N_0
+    N_2_ = lambda R, N_0: R/epsilon*N_0
+    N_3_ = lambda R_star, N_1: R_star/epsilon_star*N_1
+    N_1_N_0_ratio_ = lambda N_0, N_1: N_1/N_0
 
     # Composed parameters
-    N_1 = zfit.ComposedParameter('N_1', N_1_, [N_0]) # sig 1
+    # N_1 = zfit.ComposedParameter('N_1', N_1_, [N_0]) # sig 1
     N_m1 = zfit.ComposedParameter('N_m1', N_m1_,
                                   [R, R_star, N_0, N_1, N_comb]) # bkg
     N_2 = zfit.ComposedParameter('N_2', N_2_, [R, N_0]) # sig 2
     N_3 = zfit.ComposedParameter('N_3', N_3_, [R_star, N_1]) # sig 3
+    N_1_N_0_ratio = zfit.ComposedParameter('N_1_N_0_ratio', N_1_N_0_ratio_,
+                                           [N_0, N_1]) # for the constraint
 
 # parameters used to build the model
 params = {'-2': N_comb, '-1': N_m1, '0': N_0, '1': N_1, '2': N_2, '3': N_3}
 
 # set parameter ranges
-R.lower, R.upper           = 0, 0.5
-R_star.lower, R_star.upper = 0, 0.2
+R.lower, R.upper           = 0, 15
+R_star.lower, R_star.upper = 0, 15
 N_0.lower, N_0.upper       = 0, 0.5*N_tot_CMS
 N_1.lower, N_1.upper       = 0, 0.5*N_tot_CMS
 N_comb.lower, N_comb.upper = 0, 0.8*N_tot_CMS
@@ -306,86 +391,19 @@ N_comb.lower, N_comb.upper = 0, 0.8*N_tot_CMS
 R.set_value(R_init)
 R_star.set_value(R_star_init)
 N_0.set_value(N_0_init)
-# N_1.set_value(N_1_init)
+N_1.set_value(N_1_init)
 N_comb.set_value(N_comb_init)
 
 # set initial stepsizes
-R.step_size, R_star.step_size = 1e-4, 1e-4
+R.step_size, R_star.step_size = 1e-3, 1e-3
 N_0.step_size = 1
-# N_1.step_size = 1
+N_1.step_size = 1
 N_comb.step_size = 1
 
-# other way to choose the parameters (not used) 
-"""# initial values for the parameters from Reco data and comb bkg
-# (scaled to rasonable values)
-N_sig_init = {sig: (tree_Reco['sig']==int(sig)).sum() for sig in keys_sig}
-R_init      = N_sig_init['2']/N_sig_init['0']
-R_star_init = N_sig_init['3']/N_sig_init['1']
-N_init      = 5.0*(N_sig_init['0'] + N_sig_init['2'])
-N_star_init = 5.0*(N_sig_init['1'] + N_sig_init['3'])
-N_comb_init = 1.45*tree_comb['q2'].size
-N_star_N_ratio = (N_sig_init['1'] + N_sig_init['3']) \
-                 /(N_sig_init['0'] + N_sig_init['2'])
-
-
-# parameters can only be allocated once -> use try and except to only run this
-# part of the code, if the parameters don't already exist
-try:
-    R
-except NameError:
-    # Parameters that are optimized
-    R = zfit.Parameter('R', R_init) # R(Ds)
-    R_star = zfit.Parameter('R_star', R_star_init) # R(Ds*)
-    N = zfit.Parameter('N', N_init,) # N_0 + N_2
-    N_star = zfit.Parameter('N_star', N_star_init,) # N_1 + N_3
-    N_comb = zfit.Parameter('N_comb', N_comb_init) # combinatorial background
-
-    # Functions for composed parameters
-    N_m1_ = lambda N, N_star, N_comb: N_tot_CMS - N - N_star - N_comb
-    N_0_ = lambda R, N: N/(R+1)
-    N_1_ = lambda R_star, N_star: N_star/(R_star+1)
-    N_2_ = lambda R, N: R*N/(R+1)
-    N_3_ = lambda R_star, N_star: R_star*N_star/(R_star+1)
-
-    # Composed parameters
-    N_m1 = zfit.ComposedParameter('N_m1', N_m1_, [N, N_star, N_comb]) # bkg
-    N_0 = zfit.ComposedParameter('N_0', N_0_, [R, N]) # sig 0
-    N_1 = zfit.ComposedParameter('N_1', N_1_, [R_star, N_star]) # sig 1
-    N_2 = zfit.ComposedParameter('N_2', N_2_, [R, N]) # sig 2
-    N_3 = zfit.ComposedParameter('N_3', N_3_, [R_star, N_star]) # sig 3
-
-# parameters used to build the model
-params = {'-2': N_comb, '-1': N_m1, '0': N_0, '1': N_1, '2': N_2, '3': N_3}
-
-# set parameter ranges
-R.lower, R.upper           = 0, 0.7
-R_star.lower, R_star.upper = 0, 0.4
-N.lower, N.upper           = 0, N_tot_CMS
-N_star.lower, N_star.upper = 0, N_tot_CMS
-N_comb.lower, N_comb.upper = 0, 0.8*N_tot_CMS
-
-# set initial parameter values
-R.set_value(R_init)
-R_star.set_value(R_star_init)
-N.set_value(N_init)
-N_star.set_value(N_star_init)
-N_comb.set_value(N_comb_init)
-
-# set stepsizes
-R.step_size, R_star.step_size = 0.0001, 0.0001
-N.step_size, N_star.step_size, N_comb.step_size = 1, 1, 1"""
-
-# gaussian constraints
-"""R_exp = R_init # expected value
-DeltaR = R_init*0.2 # 20% uncertainty for R_exp
-
-R_star_exp = R_star_init # expected value
-DeltaR_star = R_star_init*0.2 # 20% uncertainty for R_star_exp"""
-
-constraints = []
-""" # [zfit.constraint.GaussianConstraint(R, R_exp, DeltaR),
-               zfit.constraint.GaussianConstraint(R_star, R_star_exp,
-                                                  DeltaR_star)]"""
+# gaussian constraints: 10% uncertainty for ratio N_1/N_0
+constraints = [zfit.constraint.GaussianConstraint(
+    N_1_N_0_ratio, N_1_N_0_ratio_Reco, 0.1*N_1_N_0_ratio_Reco
+    )]
 
 
 # %%################################
@@ -403,7 +421,12 @@ plot_ranges = {'pt_miss': (-1.0685997, 70)}
 legend_pos = {'q2': 2}
 
 # number of bins
-bins = {'q2': 15, 'pt_miss': 200, 'e_star_mu': 20, 'ds_mass': 20}
+bins = {'q2': 15, 'pt_miss': 200, 'e_star_mu': 20, 'ds_mass': 17}
+
+# weights of the combinatorial background
+weights_comb = {'q2': None, #weights_for_comb_bkg('q2'),
+               'ds_mass': None} #weights_for_comb_bkg('ds_mass')}
+
 
 # create hists from reco data and additional tau signals
 hists = dict()
@@ -412,19 +435,22 @@ for obs in keys_obs:
     for sig in keys_sig:
         hists[obs][sig] = hist.Hist(hist.axis.Regular(bins[obs], *ranges[obs],
                                                       name=obs))
-        # for the tau signals only use the tau_mc_3may.root tree
-        if sig not in ['2', '3']:
+        if sig == '-2':
+            # weight the combinatorial background
+            hists[obs][sig].fill(tree_comb[obs][tree_comb['sig']==int(sig)],
+                                 weight=weights_comb[obs])
+        if sig in ['-1', '0', '1']:
             hists[obs][sig].fill(tree_Reco[obs][tree_Reco['sig']==int(sig)])
-            hists[obs][sig].fill(tree_comb[obs][tree_comb['sig']==int(sig)])
-        else:
-            hists[obs][sig].fill(tree_Reco_tau[obs][tree_Reco_tau['sig']==int(sig)])
-        
-
+        if sig in ['2', '3']:
+            # for the tau signals only use the tau_mc_3may.root tree
+            hists[obs][sig].fill(
+                tree_Reco_tau[obs][tree_Reco_tau['sig']==int(sig)]
+            )        
 
 # plot of hists
 def obs_plot_sig(obs):
     for sig in keys_sig:
-        hists[obs][sig].plot(density=True, yerr=False, label=labels[sig])
+        hists[obs][sig].plot(density=True, yerr=True, label=labels[sig])
     if obs in plot_ranges.keys():
         plt.xlim(plot_ranges[obs])
     if obs in legend_pos:
@@ -453,9 +479,9 @@ all_obs = {obs: zfit.Space(obs, ranges[obs], binning=binning[obs])
            for obs in keys_obs}
 
 # load data into zfit (binned)
-data_zfit = {obs_name: zfit.Data.from_numpy(obs, tree_CMS[obs_name])
-                       .to_binned(obs)
-             for obs_name, obs in all_obs.items()}
+data_zfit = {obs_name: zfit.Data.from_numpy(obs, tree_CMS[obs_name]
+                                            ).to_binned(obs)
+            for obs_name, obs in all_obs.items()}
 
 # NLL function
 NLL = zfit.loss.BinnedNLL(model=histPDFs.values(), data=data_zfit.values(),
@@ -464,8 +490,8 @@ NLL = zfit.loss.BinnedNLL(model=histPDFs.values(), data=data_zfit.values(),
 # plot of the stacked pdf split into signals with initial values
 for obs in keys_obs:
     plot_stacked_hist(obs)
-    mplhep.histplot(data_zfit[obs].to_hist(), label='Observed', yerr=False,
-                    color='k')
+    mplhep.histplot(data_zfit[obs].to_hist(), label='Observed', yerr=True,
+                    color='k', histtype='step')
     if obs in plot_ranges:
         plt.xlim(plot_ranges[obs])
     if obs in legend_pos:
@@ -479,16 +505,6 @@ for obs in keys_obs:
 # %%############
 # miminization #
 ################
-
-"""# selection of the minimizer
-minimizer = zfit.minimize.Minuit()#gradient=True)
-
-# run minimizer
-result = minimizer.minimize(NLL)
-
-# calculate uncertainty of the parameters
-result.hesse()"""
-
 
 # selection of the minimizer
 minimizer = zfit.minimize.Minuit()#gradient=True)
@@ -513,17 +529,21 @@ print(f'Number of iterations until the minimizer converged: {n}')
 # Results #
 ###########
 
+# Folder where the results are saved
+folder = 'Results_of_NLL_fit/'
+
 # plot of the result split into signals
 for obs in keys_obs:
     plot_stacked_hist(obs)
-    mplhep.histplot(data_zfit[obs].to_hist(), label='Observed', yerr=False,
-                    color='k')
+    mplhep.histplot(data_zfit[obs].to_hist(), label='Observed', yerr=True,
+                    color='k', histtype='step')
     if obs in plot_ranges:
         plt.xlim(plot_ranges[obs])
     if obs in legend_pos:
         plt.legend(loc=legend_pos[obs])
     else:
         plt.legend()
+    #plt.savefig(folder + f'stacked_hist_plot_{obs}.pdf')
     plt.title('Result')
     plt.show()
 
@@ -539,10 +559,17 @@ DeltaR_res = result.hesse()[R]['error']
 R_star_res = result.values[R_star]
 DeltaR_star_res = result.hesse()[R_star]['error']
 
+# theoretical predictions
+R_theo = 0.2971
+DeltaR_theo = 0.0034
+R_star_theo = 0.2472
+DeltaR_star_theo = 0.0077
+
+
 # ranges for plotting
-R_plot_range = (R_res - 1.5*DeltaR_res, R_res + 1.5*DeltaR_res)
-R_star_plot_range = (R_star_res - 1.5*DeltaR_star_res,
-                     R_star_res + 1.5*DeltaR_star_res)
+R_plot_range = (R_res - 1.2*DeltaR_res, R_res + 1.2*DeltaR_res)
+R_star_plot_range = (R_star_res - 1.2*DeltaR_star_res,
+                     R_star_res + 1.2*DeltaR_star_res)
 
 # change ranges of parameters for plotting
 R.lower, R.upper = R_plot_range
@@ -554,22 +581,25 @@ NLL_plot = zfit.loss.BinnedNLL(model=histPDFs.values(),
                                constraints=constraints)
 
 # plot of profile of R
-plot_profile(R, R_plot_range, NLL_plot)
+plot_profile(R, R_plot_range, NLL_plot, name='$R(D_s)$', num=100)
 plt.minorticks_on()
 plt.grid(True)
+#plt.savefig(folder + 'R_profile.pdf')
 plt.show()
 
 # plot of profile of R_star
-plot_profile(R_star, R_star_plot_range, NLL_plot, name='$R^*$')
+plot_profile(R_star, R_star_plot_range, NLL_plot, name='$R(D_s^*)$', num=100)
 plt.minorticks_on()
 plt.grid(True)
+#plt.savefig(folder + 'R_star_profile.pdf')
 plt.show()
 
 # plot contour of R, R_star
 plot_contour(R, R_star, range1=R_plot_range, range2=R_star_plot_range,
-             NLL=NLL_plot, ylabel='$R^*$')
+             NLL=NLL_plot, xlabel='$R(D_s)$', ylabel='$R(D_s^*)$', num=100)
 plt.minorticks_on()
 plt.grid(True)
+#plt.savefig(folder + 'R_R_star_contour.pdf')
 plt.show()
 
 
@@ -577,10 +607,6 @@ plt.show()
 # ToDos #
 #########
 # - Also plot 2 sigma contour? i.e. 2*DeltaNLL = 4 = 2**2
-# - Change allocation of parameters such that the other params don't depend 
-#   on N_1
-# - Include detector efficiency. The values used in the MC are:
-#       R(Ds) = 0.381, R(Ds*) = 0.327
 
 
 
