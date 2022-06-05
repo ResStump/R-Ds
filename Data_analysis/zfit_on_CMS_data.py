@@ -199,23 +199,6 @@ m_Ds = 1.96834 # [GeV]
 ###########
 
 # cuts to be applied
-"""cuts = f"(ds_m_mass<={m_Bs}) & (abs(mu_bs_dxy_sig)>5) & (mu_pt>8) & (HLT_Mu7_IP4==1) & (mu_rel_iso<.2) & (mu_charge*pi_charge<0) & (ds_vtx_prob>0.1) & (cos3D_ds_m>0.995) & (phi_vtx_prob>0.1) & (abs(phi_mass-1.020)<0.01)  & (lxyz_ds_m_sig>10)"
-selection = ') & ('.join([
-    '(abs(mu_bs_dxy_sig)>5',
-    'mu_pt>8',
-    'k1_pt>1.',
-    'k2_pt>1.',
-    'pi_pt>1.',
-    'HLT_Mu7_IP4==1',
-    'mu_rel_iso<.1',
-    'ds_vtx_prob>0.1',
-    'cos3D_ds_m>0.995',
-    'phi_vtx_prob>0.1',
-    'lxyz_ds_m_sig>10',
-    'mu_id_medium==1',
-    f'ds_m_mass<={m_Bs}',
-    'mu_charge*pi_charge<0)'])"""
-
 selection = [
     f'ds_m_mass<={m_Bs}',
     'ds_m_mass>2.16',
@@ -226,6 +209,7 @@ selection = [
     'k1_pt>1.',
     'k2_pt>1.',
     'pi_pt>1.',
+    f'abs(phi_mass-{m_phi})<0.01',
     'phi_vtx_prob>0.1',
     'ds_vtx_prob>0.1',
     'cos3D_ds_m>0.995',
