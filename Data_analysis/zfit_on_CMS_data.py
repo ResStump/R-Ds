@@ -2,9 +2,9 @@
 import numpy as np
 import uproot
 import matplotlib.pyplot as plt
-plt.rcParams['savefig.bbox'] = 'tight'
 import mplhep
 plt.style.use(mplhep.style.ROOT)
+plt.rcParams['figure.dpi'] = 50
 import hist
 import zfit
 from scipy.stats import rv_histogram
@@ -37,8 +37,53 @@ def plot_stacked_hist(obs):
     plt.legend()
     return
 
+# plots visualization of ds_mass shift with final results of fit
+def plot_ds_mass_shift(nbins=None, save_plot=False):
+    if nbins == None:
+        nbins = bins['ds_mass']
+    bin_edges = np.histogram_bin_edges(1, nbins, ranges['ds_mass'])
+    data = {'-2': tree_comb['ds_mass'],
+            '-1': tree_Reco['ds_mass'][tree_Reco['sig']==int('-1')],
+             '0': tree_Reco['ds_mass'][tree_Reco['sig']==int('0')],
+             '1': tree_Reco['ds_mass'][tree_Reco['sig']==int('1')],
+             '2': tree_Reco_tau['ds_mass'][tree_Reco_tau['sig']==int('2')],
+             '3': tree_Reco_tau['ds_mass'][tree_Reco_tau['sig']==int('3')]}
+    counts = np.zeros(nbins)
+    counts_no_shift = np.zeros(nbins)
+    for sig in keys_sig:
+        factor = params[sig].numpy()/data[sig].size
+        counts += factor*np.histogram(data[sig], bin_edges)[0]
+        if sig == '-2':
+            counts_no_shift += factor*np.histogram(data[sig], bin_edges)[0]
+        else:
+            counts_no_shift += factor*np.histogram(data[sig]/ds_mass_shift,
+                                                  bin_edges)[0]
+    hist_CMS = np.histogram(tree_CMS['ds_mass'], bin_edges)
 
-# Likelyhood scanns
+    mplhep.histplot((counts, bin_edges), label='MC', yerr=False)
+    mplhep.histplot(hist_CMS, label='observed', yerr=True)
+    plt.xlabel(labels_obs['ds_mass'])
+    plt.ylabel('Number of events')
+    plt.legend()
+    if save_plot:
+        plt.savefig(folder + 'ds_mass_with_mass_shift.pdf')
+    plt.title('With mass shift')
+    plt.show()
+
+    mplhep.histplot((counts_no_shift, bin_edges), label='MC',
+                    yerr=False)
+    mplhep.histplot(hist_CMS, label='observed', yerr=True)
+    plt.xlabel(labels_obs['ds_mass'])
+    plt.ylabel('Number of events')
+    plt.legend()
+    if save_plot:
+        plt.savefig(folder + 'ds_mass_without_mass_shift.pdf')
+    plt.title('Without mass shift')
+    plt.show()
+    return
+
+
+# Likelihood scans
 ###################
 
 def plot_profile(param, range, NLL, name=None, num=50):
@@ -117,7 +162,7 @@ def det_ranges(obs):
     maximum = max(np.nanmax(tree_Reco[obs]), np.nanmax(tree_Reco_tau[obs]))
     return (minimum, maximum)
 
-def weights_for_comb_bkg(obs, nbins=None, make_plots=False):
+def weights_for_comb_bkg(obs, nbins=None, make_plots=False, save_plot=False):
     """Returns the weights for the combinatorial background of the observable
     obs to correct the difference in shape for same and opposite mu and pi
     charge."""
@@ -169,15 +214,24 @@ def weights_for_comb_bkg(obs, nbins=None, make_plots=False):
     # set possible nans to one
     weights_binned = np.nan_to_num(weights_binned, nan=1.0)
 
-    if make_plots:
+    if make_plots or save_plot:
         plt.hist(comb_same, bins[obs], density=True, range=ranges[obs],
                  label='same charge', histtype='step')
         plt.hist(comb_opposite, bins[obs], density=True, range=ranges[obs],
                  label='opposite charge', histtype='step')
-        plt.legend(), plt.title('comb_bkg')
+        plt.xlabel(labels_obs[obs])
+        plt.ylabel('a.u.')
+        if obs in legend_pos:
+            plt.legend(loc=legend_pos[obs])
+        else:
+            plt.legend()
+        if save_plot:
+            plt.savefig(folder + f'comb_bkg_{obs}.pdf')
+        plt.title('comb_bkg')
         plt.show()
         mplhep.histplot(weights_binned, binning)
-        plt.title('Weights')
+        plt.xlabel(labels_obs[obs])
+        plt.ylabel('Weights')
         plt.show()
 
     # calculate weights for the individual events
@@ -194,28 +248,12 @@ def weights_for_comb_bkg(obs, nbins=None, make_plots=False):
 # constants
 m_Bs = 5.36688 # [GeV]
 m_Ds = 1.96834 # [GeV]
+m_phi = 1.019461 # [GeV]
 
 # filtering
 ###########
 
 # cuts to be applied
-"""cuts = f"(ds_m_mass<={m_Bs}) & (abs(mu_bs_dxy_sig)>5) & (mu_pt>8) & (HLT_Mu7_IP4==1) & (mu_rel_iso<.2) & (mu_charge*pi_charge<0) & (ds_vtx_prob>0.1) & (cos3D_ds_m>0.995) & (phi_vtx_prob>0.1) & (abs(phi_mass-1.020)<0.01)  & (lxyz_ds_m_sig>10)"
-selection = ') & ('.join([
-    '(abs(mu_bs_dxy_sig)>5',
-    'mu_pt>8',
-    'k1_pt>1.',
-    'k2_pt>1.',
-    'pi_pt>1.',
-    'HLT_Mu7_IP4==1',
-    'mu_rel_iso<.1',
-    'ds_vtx_prob>0.1',
-    'cos3D_ds_m>0.995',
-    'phi_vtx_prob>0.1',
-    'lxyz_ds_m_sig>10',
-    'mu_id_medium==1',
-    f'ds_m_mass<={m_Bs}',
-    'mu_charge*pi_charge<0)'])"""
-
 selection = [
     f'ds_m_mass<={m_Bs}',
     'ds_m_mass>2.16',
@@ -226,6 +264,7 @@ selection = [
     'k1_pt>1.',
     'k2_pt>1.',
     'pi_pt>1.',
+    f'abs(phi_mass-{m_phi})<0.01',
     'phi_vtx_prob>0.1',
     'ds_vtx_prob>0.1',
     'cos3D_ds_m>0.995',
@@ -547,6 +586,9 @@ for obs in keys_obs:
     plt.title('Result')
     plt.show()
 
+# plots visualization of ds_mass shift with final results of fit
+#plot_ds_mass_shift(nbins=30, save_plot=False)
+
 result.hesse()
 
 # print results
@@ -567,9 +609,9 @@ DeltaR_star_theo = 0.0077
 
 
 # ranges for plotting
-R_plot_range = (R_res - 1.2*DeltaR_res, R_res + 1.2*DeltaR_res)
-R_star_plot_range = (R_star_res - 1.2*DeltaR_star_res,
-                     R_star_res + 1.2*DeltaR_star_res)
+R_plot_range = (R_res - 1.0*DeltaR_res, R_res + 1.0*DeltaR_res)
+R_star_plot_range = (R_star_res - 1.0*DeltaR_star_res,
+                     R_star_res + 1.0*DeltaR_star_res)
 
 # change ranges of parameters for plotting
 R.lower, R.upper = R_plot_range
@@ -581,14 +623,14 @@ NLL_plot = zfit.loss.BinnedNLL(model=histPDFs.values(),
                                constraints=constraints)
 
 # plot of profile of R
-plot_profile(R, R_plot_range, NLL_plot, name='$R(D_s)$', num=100)
+plot_profile(R, R_plot_range, NLL_plot, name='$R(D_s)$', num=70)
 plt.minorticks_on()
 plt.grid(True)
 #plt.savefig(folder + 'R_profile.pdf')
 plt.show()
 
 # plot of profile of R_star
-plot_profile(R_star, R_star_plot_range, NLL_plot, name='$R(D_s^*)$', num=100)
+plot_profile(R_star, R_star_plot_range, NLL_plot, name='$R(D_s^*)$', num=70)
 plt.minorticks_on()
 plt.grid(True)
 #plt.savefig(folder + 'R_star_profile.pdf')
@@ -596,7 +638,9 @@ plt.show()
 
 # plot contour of R, R_star
 plot_contour(R, R_star, range1=R_plot_range, range2=R_star_plot_range,
-             NLL=NLL_plot, xlabel='$R(D_s)$', ylabel='$R(D_s^*)$', num=100)
+             NLL=NLL_plot, xlabel='$R(D_s)$', ylabel='$R(D_s^*)$', num=50)
+#plt.errorbar(R_theo, DeltaR_theo, R_star_theo, DeltaR_star_theo, 'r',
+             #label='Theroetical prediction')
 plt.minorticks_on()
 plt.grid(True)
 #plt.savefig(folder + 'R_R_star_contour.pdf')
